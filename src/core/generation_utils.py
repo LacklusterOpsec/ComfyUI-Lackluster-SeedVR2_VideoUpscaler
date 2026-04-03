@@ -44,6 +44,54 @@ from ..utils.constants import get_script_directory
 script_directory = get_script_directory()
 
 
+def _log_tensor_debug_state(debug: Optional['Debug'], label: str, tensor: Optional[torch.Tensor]) -> None:
+    """Log lightweight tensor metadata around transform breadcrumbs."""
+    if debug is None:
+        return
+
+    if tensor is None:
+        debug.log(f"SeedVR2 breadcrumb: {label}: tensor=None", category="setup", force=True)
+        return
+
+    shape = tuple(tensor.shape)
+    dtype = tensor.dtype
+    device = tensor.device
+    approx_mib = (tensor.numel() * tensor.element_size()) / (1024 * 1024)
+    debug.log(
+        f"SeedVR2 breadcrumb: {label}: shape={shape}, dtype={dtype}, device={device}, approx_mib={approx_mib:.2f}",
+        category="setup",
+        force=True,
+    )
+
+
+def _resize_sample_frame_for_target_dims(
+    sample_frame: torch.Tensor,
+    resolution: int,
+    max_resolution: int = 0,
+    debug: Optional['Debug'] = None,
+) -> torch.Tensor:
+    """Apply the target-dimension probe transform with step-level breadcrumbs."""
+    resize = NaResize(
+        resolution=resolution,
+        mode="side",
+        downsample_only=False,
+        max_resolution=max_resolution,
+    )
+
+    _log_tensor_debug_state(debug, "temp_transform input", sample_frame)
+    debug.log("SeedVR2 breadcrumb: before NaResize(sample_frame)", category="setup", force=True) if debug else None
+    resized_sample = resize(sample_frame)
+    debug.log("SeedVR2 breadcrumb: after NaResize(sample_frame)", category="setup", force=True) if debug else None
+    _log_tensor_debug_state(debug, "temp_transform after NaResize", resized_sample)
+
+    debug.log("SeedVR2 breadcrumb: before clamp(sample_frame)", category="setup", force=True) if debug else None
+    resized_sample = torch.clamp(resized_sample, 0.0, 1.0)
+    debug.log("SeedVR2 breadcrumb: after clamp(sample_frame)", category="setup", force=True) if debug else None
+    _log_tensor_debug_state(debug, "temp_transform after clamp", resized_sample)
+
+    return resized_sample
+
+
 def prepare_video_transforms(resolution: int, max_resolution: int = 0, debug: Optional['Debug'] = None) -> Compose:
     """
     Prepare optimized video transformation pipeline
@@ -114,12 +162,13 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
                 debug.log("Reusing pre-initialized video transformation pipeline", category="reuse")
             return true_h, true_w, padded_h, padded_w
         if sample_frame is not None:
-            temp_transform = Compose([
-                NaResize(resolution=resolution, mode="side", downsample_only=False, max_resolution=max_resolution),
-                Lambda(lambda x: torch.clamp(x, 0.0, 1.0))
-            ])
             debug.log("SeedVR2 breadcrumb: before temp_transform(sample_frame)", category="setup", force=True) if debug else None
-            resized_sample = temp_transform(sample_frame)
+            resized_sample = _resize_sample_frame_for_target_dims(
+                sample_frame,
+                resolution,
+                max_resolution,
+                debug,
+            )
             debug.log("SeedVR2 breadcrumb: after temp_transform(sample_frame)", category="setup", force=True) if debug else None
             resized_h, resized_w = resized_sample.shape[-2:]
 
@@ -143,7 +192,7 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
                     debug.log(f"Target dimensions: {true_w}x{true_h} (padded to {padded_w}x{padded_h} for processing)",
                              category="setup", indent_level=1)
 
-            del temp_transform, resized_sample
+            del resized_sample
             return true_h, true_w, padded_h, padded_w
         elif debug:
             debug.log("Reusing pre-initialized video transformation pipeline", category="reuse")
@@ -156,12 +205,13 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
     # Compute dimensions if sample frame provided
     if sample_frame is not None:
         # Get true target size (after resize, before padding)
-        temp_transform = Compose([
-            NaResize(resolution=resolution, mode="side", downsample_only=False, max_resolution=max_resolution),
-            Lambda(lambda x: torch.clamp(x, 0.0, 1.0))
-        ])
         debug.log("SeedVR2 breadcrumb: before temp_transform(sample_frame)", category="setup", force=True) if debug else None
-        resized_sample = temp_transform(sample_frame)
+        resized_sample = _resize_sample_frame_for_target_dims(
+            sample_frame,
+            resolution,
+            max_resolution,
+            debug,
+        )
         debug.log("SeedVR2 breadcrumb: after temp_transform(sample_frame)", category="setup", force=True) if debug else None
         resized_h, resized_w = resized_sample.shape[-2:]
         
@@ -184,8 +234,8 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
             else:
                 debug.log(f"Target dimensions: {true_w}x{true_h} (padded to {padded_w}x{padded_h} for processing)", 
                          category="setup", indent_level=1)
-        
-        del temp_transform, resized_sample
+
+        del resized_sample
         return true_h, true_w, padded_h, padded_w
     
     return 0, 0, 0, 0
