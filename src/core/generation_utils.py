@@ -193,14 +193,14 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
                 debug.log("Reusing pre-initialized video transformation pipeline", category="reuse")
             return true_h, true_w, padded_h, padded_w
         if sample_frame is not None:
-            debug.log("SeedVR2 breadcrumb: before temp_transform(sample_frame)", category="setup", force=True) if debug else None
+            debug.log("SeedVR2 breadcrumb: before compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
             resized_h, resized_w = _compute_sample_frame_target_dims(
                 sample_frame,
                 resolution,
                 max_resolution,
                 debug,
             )
-            debug.log("SeedVR2 breadcrumb: after temp_transform(sample_frame)", category="setup", force=True) if debug else None
+            debug.log("SeedVR2 breadcrumb: after compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
 
             # Round to even numbers for video codec compatibility (libx264 requirement)
             true_h = (resized_h // 2) * 2
@@ -234,14 +234,14 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
     # Compute dimensions if sample frame provided
     if sample_frame is not None:
         # Get true target size (after resize, before padding)
-        debug.log("SeedVR2 breadcrumb: before temp_transform(sample_frame)", category="setup", force=True) if debug else None
+        debug.log("SeedVR2 breadcrumb: before compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
         resized_h, resized_w = _compute_sample_frame_target_dims(
             sample_frame,
             resolution,
             max_resolution,
             debug,
         )
-        debug.log("SeedVR2 breadcrumb: after temp_transform(sample_frame)", category="setup", force=True) if debug else None
+        debug.log("SeedVR2 breadcrumb: after compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
         
         # Round to even numbers for video codec compatibility (libx264 requirement)
         true_h = (resized_h // 2) * 2
