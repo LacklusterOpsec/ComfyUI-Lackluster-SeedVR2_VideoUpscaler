@@ -143,8 +143,15 @@ def _reconstruct_and_transform_batch(
         Transformed video in CTHW format, ready for color correction
     """
     start_idx, end_idx, uniform_padding = ctx['batch_metadata'][batch_idx]
+    phase4_probe_enabled = getattr(debug, "enabled", False)
     
     # Prepare video batch
+    if phase4_probe_enabled:
+        debug.log(
+            f"SeedVR2 breadcrumb: reconstruct batch {batch_idx+1} before _prepare_video_batch",
+            category="setup",
+            force=True,
+        )
     video = _prepare_video_batch(
         images=ctx['input_images'],
         start_idx=start_idx,
@@ -153,9 +160,50 @@ def _reconstruct_and_transform_batch(
         debug=None,
         log_info=False
     )
+    if phase4_probe_enabled:
+        debug.log(
+            f"SeedVR2 breadcrumb: reconstruct batch {batch_idx+1} after _prepare_video_batch",
+            category="setup",
+            force=True,
+        )
+
+    # Mirror Phase 1 ordering: move to the VAE device before padding and transform.
+    if phase4_probe_enabled:
+        debug.log(
+            f"SeedVR2 breadcrumb: reconstruct batch {batch_idx+1} before manage_tensor(video->vae_device)",
+            category="setup",
+            force=True,
+        )
+    video = manage_tensor(
+        tensor=video,
+        target_device=ctx['vae_device'],
+        tensor_name=f"reconstructed_video_batch_{batch_idx+1}",
+        dtype=ctx['compute_dtype'],
+        debug=debug,
+        reason="Phase 4 input reconstruction",
+        indent_level=1,
+    )
+    if phase4_probe_enabled:
+        debug.log(
+            f"SeedVR2 breadcrumb: reconstruct batch {batch_idx+1} after manage_tensor(video->vae_device)",
+            category="setup",
+            force=True,
+        )
     
     # Apply 4n+1 padding using shared helper
+    if phase4_probe_enabled:
+        debug.log(
+            f"SeedVR2 breadcrumb: reconstruct batch {batch_idx+1} before _apply_4n1_padding",
+            category="setup",
+            force=True,
+        )
     video = _apply_4n1_padding(video)
+    if phase4_probe_enabled:
+        debug.log(
+            f"SeedVR2 breadcrumb: reconstruct batch {batch_idx+1} after _apply_4n1_padding",
+            category="setup",
+            force=True,
+        )
     
     # Extract RGB and transform
     if ctx.get('is_rgba', False):
@@ -163,7 +211,19 @@ def _reconstruct_and_transform_batch(
     else:
         rgb_video = video
     
+    if phase4_probe_enabled:
+        debug.log(
+            f"SeedVR2 breadcrumb: reconstruct batch {batch_idx+1} before video_transform(rgb_video)",
+            category="setup",
+            force=True,
+        )
     transformed_video = ctx['video_transform'](rgb_video)
+    if phase4_probe_enabled:
+        debug.log(
+            f"SeedVR2 breadcrumb: reconstruct batch {batch_idx+1} after video_transform(rgb_video)",
+            category="setup",
+            force=True,
+        )
     
     del video
     
