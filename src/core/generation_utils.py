@@ -29,8 +29,11 @@ These utilities support the 4-phase pipeline implemented in generation_phases.py
 
 import os
 import torch
-from typing import Dict, List, Optional, Tuple, Any, Callable, Union
+from typing import Dict, List, Optional, Tuple, Any, Callable, Union, TYPE_CHECKING
 from torchvision.transforms import Compose, Lambda, Normalize
+
+if TYPE_CHECKING:
+    from ..utils.debug import Debug
 
 from .model_configuration import configure_runner
 from .infer import VideoDiffusionInfer
