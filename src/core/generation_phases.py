@@ -294,6 +294,7 @@ def encode_all_batches(
         ctx['batch_metadata'] = [None] * num_encode_batches
     
     encode_idx = 0
+    validated_computed_target_dims = False
     
     try:
         vae_needs_reactivation = runner.vae is not None and is_model_cache_cold(runner.vae)
@@ -423,6 +424,33 @@ def encode_all_batches(
                 rgb_video = video
 
             transformed_video = ctx['video_transform'](rgb_video)
+
+            if (
+                getattr(debug, "enabled", False)
+                and not validated_computed_target_dims
+                and 'padded_target_dims' in ctx
+                and 'true_target_dims' in ctx
+            ):
+                actual_padded_h, actual_padded_w = transformed_video.shape[-2:]
+                expected_padded_h, expected_padded_w = ctx['padded_target_dims']
+                expected_true_h, expected_true_w = ctx['true_target_dims']
+
+                if (actual_padded_h, actual_padded_w) != (expected_padded_h, expected_padded_w):
+                    msg = (
+                        "Computed target dims mismatch: "
+                        f"expected padded {expected_padded_w}x{expected_padded_h}, "
+                        f"actual transform output {actual_padded_w}x{actual_padded_h}, "
+                        f"cached true target {expected_true_w}x{expected_true_h}"
+                    )
+                    debug.log(msg, level="ERROR", category="setup", force=True)
+                    raise RuntimeError(msg)
+
+                debug.log(
+                    f"Validated computed target dims against actual transform output: padded {expected_padded_w}x{expected_padded_h}, true {expected_true_w}x{expected_true_h}",
+                    category="setup",
+                    force=True,
+                )
+                validated_computed_target_dims = True
 
             # Apply input noise if requested (to reduce artifacts at high resolutions)
             if input_noise_scale > 0:
@@ -1302,7 +1330,23 @@ def postprocess_all_batches(
                     # Trim spatial dimensions to true target size
                     if 'true_target_dims' in ctx:
                         true_h, true_w = ctx['true_target_dims']
-                        if input_video.shape[-2] != true_h or input_video.shape[-1] != true_w:
+                        current_h, current_w = input_video.shape[-2:]
+                        if current_h != true_h or current_w != true_w:
+                            if current_h < true_h or current_w < true_w:
+                                msg = (
+                                    "Reconstructed input spatial dims smaller than expected true target dims: "
+                                    f"{current_w}x{current_h} < {true_w}x{true_h}"
+                                )
+                                if debug:
+                                    debug.log(msg, level="ERROR", category="video", force=True)
+                                raise RuntimeError(msg)
+
+                            if debug:
+                                debug.log(
+                                    f"Trimming reconstructed input spatial padding: {current_w}x{current_h} → {true_w}x{true_h}",
+                                    category="video",
+                                    indent_level=1,
+                                )
                             input_video = input_video[:, :, :true_h, :true_w]
             
             # Apply color correction if enabled (RGB only)
