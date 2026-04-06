@@ -426,8 +426,7 @@ def encode_all_batches(
             transformed_video = ctx['video_transform'](rgb_video)
 
             if (
-                getattr(debug, "enabled", False)
-                and not validated_computed_target_dims
+                not validated_computed_target_dims
                 and 'padded_target_dims' in ctx
                 and 'true_target_dims' in ctx
             ):
@@ -442,14 +441,16 @@ def encode_all_batches(
                         f"actual transform output {actual_padded_w}x{actual_padded_h}, "
                         f"cached true target {expected_true_w}x{expected_true_h}"
                     )
-                    debug.log(msg, level="ERROR", category="setup", force=True)
+                    if debug is not None:
+                        debug.log(msg, level="ERROR", category="setup", force=True)
                     raise RuntimeError(msg)
 
-                debug.log(
-                    f"Validated computed target dims against actual transform output: padded {expected_padded_w}x{expected_padded_h}, true {expected_true_w}x{expected_true_h}",
-                    category="setup",
-                    force=True,
-                )
+                if getattr(debug, "enabled", False):
+                    debug.log(
+                        f"Validated computed target dims against actual transform output: padded {expected_padded_w}x{expected_padded_h}, true {expected_true_w}x{expected_true_h}",
+                        category="setup",
+                        force=True,
+                    )
                 validated_computed_target_dims = True
 
             # Apply input noise if requested (to reduce artifacts at high resolutions)
