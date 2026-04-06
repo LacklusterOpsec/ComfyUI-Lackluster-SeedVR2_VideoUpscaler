@@ -29,8 +29,11 @@ These utilities support the 4-phase pipeline implemented in generation_phases.py
 
 import os
 import torch
-from typing import Dict, List, Optional, Tuple, Any, Callable, Union
+from typing import Dict, List, Optional, Tuple, Any, Callable, Union, TYPE_CHECKING
 from torchvision.transforms import Compose, Lambda, Normalize
+
+if TYPE_CHECKING:
+    from ..utils.debug import Debug
 
 from .model_configuration import configure_runner
 from .infer import VideoDiffusionInfer
@@ -64,32 +67,63 @@ def _log_tensor_debug_state(debug: Optional['Debug'], label: str, tensor: Option
     )
 
 
-def _resize_sample_frame_for_target_dims(
+def _compute_side_resize_output_dims(
+    input_height: int,
+    input_width: int,
+    resolution: int,
+    max_resolution: int = 0,
+) -> Tuple[int, int]:
+    """Compute output dims for the target-dimension probe path.
+
+    Matches SideResize with downsample_only=False and the current max_size
+    second pass, without executing the resize kernel.
+    """
+    short, long = (input_width, input_height) if input_width <= input_height else (input_height, input_width)
+
+    # Match torchvision Resize(int) behavior used by SideResize:
+    # shortest edge = resolution, longest edge scaled with floor(int(...))
+    resized_short = resolution
+    resized_long = int(resolution * long / short)
+
+    if input_width <= input_height:
+        resized_w, resized_h = resized_short, resized_long
+    else:
+        resized_w, resized_h = resized_long, resized_short
+
+    # Match SideResize's second-pass max_size handling exactly.
+    if max_resolution > 0 and max(resized_h, resized_w) > max_resolution:
+        scale = max_resolution / max(resized_h, resized_w)
+        resized_h = round(resized_h * scale)
+        resized_w = round(resized_w * scale)
+
+    return resized_h, resized_w
+
+
+def _compute_sample_frame_target_dims(
     sample_frame: torch.Tensor,
     resolution: int,
     max_resolution: int = 0,
     debug: Optional['Debug'] = None,
-) -> torch.Tensor:
-    """Apply the target-dimension probe transform with step-level breadcrumbs."""
-    resize = NaResize(
-        resolution=resolution,
-        mode="side",
-        downsample_only=False,
-        max_resolution=max_resolution,
-    )
+) -> Tuple[int, int]:
+    """Compute probe target dimensions with breadcrumbs but without running a real resize."""
+    input_h, input_w = sample_frame.shape[-2:]
 
     _log_tensor_debug_state(debug, "temp_transform input", sample_frame)
-    debug.log("SeedVR2 breadcrumb: before NaResize(sample_frame)", category="setup", force=True) if debug else None
-    resized_sample = resize(sample_frame)
-    debug.log("SeedVR2 breadcrumb: after NaResize(sample_frame)", category="setup", force=True) if debug else None
-    _log_tensor_debug_state(debug, "temp_transform after NaResize", resized_sample)
+    debug.log("SeedVR2 breadcrumb: before compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
+    resized_h, resized_w = _compute_side_resize_output_dims(
+        input_height=input_h,
+        input_width=input_w,
+        resolution=resolution,
+        max_resolution=max_resolution,
+    )
+    debug.log(
+        f"SeedVR2 breadcrumb: computed temp_transform target dims: input=({input_h}, {input_w}) -> resized=({resized_h}, {resized_w})",
+        category="setup",
+        force=True,
+    ) if debug else None
+    debug.log("SeedVR2 breadcrumb: after compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
 
-    debug.log("SeedVR2 breadcrumb: before clamp(sample_frame)", category="setup", force=True) if debug else None
-    resized_sample = torch.clamp(resized_sample, 0.0, 1.0)
-    debug.log("SeedVR2 breadcrumb: after clamp(sample_frame)", category="setup", force=True) if debug else None
-    _log_tensor_debug_state(debug, "temp_transform after clamp", resized_sample)
-
-    return resized_sample
+    return resized_h, resized_w
 
 
 def prepare_video_transforms(resolution: int, max_resolution: int = 0, debug: Optional['Debug'] = None) -> Compose:
@@ -162,15 +196,14 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
                 debug.log("Reusing pre-initialized video transformation pipeline", category="reuse")
             return true_h, true_w, padded_h, padded_w
         if sample_frame is not None:
-            debug.log("SeedVR2 breadcrumb: before temp_transform(sample_frame)", category="setup", force=True) if debug else None
-            resized_sample = _resize_sample_frame_for_target_dims(
+            debug.log("SeedVR2 breadcrumb: before compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
+            resized_h, resized_w = _compute_sample_frame_target_dims(
                 sample_frame,
                 resolution,
                 max_resolution,
                 debug,
             )
-            debug.log("SeedVR2 breadcrumb: after temp_transform(sample_frame)", category="setup", force=True) if debug else None
-            resized_h, resized_w = resized_sample.shape[-2:]
+            debug.log("SeedVR2 breadcrumb: after compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
 
             # Round to even numbers for video codec compatibility (libx264 requirement)
             true_h = (resized_h // 2) * 2
@@ -192,7 +225,6 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
                     debug.log(f"Target dimensions: {true_w}x{true_h} (padded to {padded_w}x{padded_h} for processing)",
                              category="setup", indent_level=1)
 
-            del resized_sample
             return true_h, true_w, padded_h, padded_w
         elif debug:
             debug.log("Reusing pre-initialized video transformation pipeline", category="reuse")
@@ -205,15 +237,14 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
     # Compute dimensions if sample frame provided
     if sample_frame is not None:
         # Get true target size (after resize, before padding)
-        debug.log("SeedVR2 breadcrumb: before temp_transform(sample_frame)", category="setup", force=True) if debug else None
-        resized_sample = _resize_sample_frame_for_target_dims(
+        debug.log("SeedVR2 breadcrumb: before compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
+        resized_h, resized_w = _compute_sample_frame_target_dims(
             sample_frame,
             resolution,
             max_resolution,
             debug,
         )
-        debug.log("SeedVR2 breadcrumb: after temp_transform(sample_frame)", category="setup", force=True) if debug else None
-        resized_h, resized_w = resized_sample.shape[-2:]
+        debug.log("SeedVR2 breadcrumb: after compute_target_dims(sample_frame)", category="setup", force=True) if debug else None
         
         # Round to even numbers for video codec compatibility (libx264 requirement)
         true_h = (resized_h // 2) * 2
@@ -235,7 +266,6 @@ def setup_video_transform(ctx: Dict[str, Any], resolution: int, max_resolution: 
                 debug.log(f"Target dimensions: {true_w}x{true_h} (padded to {padded_w}x{padded_h} for processing)", 
                          category="setup", indent_level=1)
 
-        del resized_sample
         return true_h, true_w, padded_h, padded_w
     
     return 0, 0, 0, 0
