@@ -857,6 +857,9 @@ def configure_runner(
     decode_tile_size: Optional[Tuple[int, int]] = None,
     decode_tile_overlap: Optional[Tuple[int, int]] = None,
     tile_debug: str = "false",
+    dit_tiled: bool = False,
+    dit_tile_size: Optional[Tuple[int, int]] = None,
+    dit_tile_overlap: Optional[Tuple[int, int]] = None,
     attention_mode: str = 'sdpa',
     torch_compile_args_dit: Optional[Dict[str, Any]] = None,
     torch_compile_args_vae: Optional[Dict[str, Any]] = None
@@ -884,6 +887,9 @@ def configure_runner(
         decode_tile_size: Tile size for decoding (height, width)
         decode_tile_overlap: Tile overlap for decoding (height, width)
         tile_debug: Tile visualization mode (false/encode/decode)
+        dit_tiled: Enable spatial DiT tiling during upscaling
+        dit_tile_size: Spatial DiT tile size (height, width) in latent-space pixels
+        dit_tile_overlap: Spatial overlap (height, width) between DiT tiles in latent-space pixels
         attention_mode: Attention computation backend ('sdpa', 'flash_attn_2', 'flash_attn_3', 'sageattn_2', or 'sageattn_3')
         torch_compile_args_dit: Optional torch.compile configuration for DiT model
         torch_compile_args_vae: Optional torch.compile configuration for VAE model
@@ -934,7 +940,7 @@ def configure_runner(
             cache_context.get('vae_id') if vae_cache else None,
             encode_tiled, encode_tile_size, encode_tile_overlap,
             decode_tiled, decode_tile_size, decode_tile_overlap,
-            tile_debug, attention_mode,
+            tile_debug, dit_tiled, dit_tile_size, dit_tile_overlap, attention_mode,
             torch_compile_args_dit, torch_compile_args_vae,
             block_swap_config, debug
         )
@@ -1062,6 +1068,9 @@ def _configure_runner_settings(
     decode_tile_size: Optional[Tuple[int, int]],
     decode_tile_overlap: Optional[Tuple[int, int]],
     tile_debug: str,
+    dit_tiled: bool,
+    dit_tile_size: Optional[Tuple[int, int]],
+    dit_tile_overlap: Optional[Tuple[int, int]],
     attention_mode: str,
     torch_compile_args_dit: Optional[Dict[str, Any]],
     torch_compile_args_vae: Optional[Dict[str, Any]],
@@ -1086,6 +1095,9 @@ def _configure_runner_settings(
         decode_tile_size: Tile dimensions (height, width) for decoding in pixels
         decode_tile_overlap: Overlap dimensions (height, width) between decoding tiles
         tile_debug: Tile visualization mode (false/encode/decode)
+        dit_tiled: Enable spatial DiT tiling during upscaling
+        dit_tile_size: Spatial DiT tile size (height, width) in latent-space pixels
+        dit_tile_overlap: Spatial overlap (height, width) between DiT tiles in latent-space pixels
         attention_mode: Attention computation backend ('sdpa', 'flash_attn_2', 'flash_attn_3', 'sageattn_2', or 'sageattn_3')
         torch_compile_args_dit: torch.compile configuration for DiT model or None
         torch_compile_args_vae: torch.compile configuration for VAE model or None
@@ -1100,6 +1112,9 @@ def _configure_runner_settings(
     runner.decode_tile_size = decode_tile_size
     runner.decode_tile_overlap = decode_tile_overlap
     runner.tile_debug = tile_debug
+    runner.dit_tiled = dit_tiled
+    runner.dit_tile_size = dit_tile_size
+    runner.dit_tile_overlap = dit_tile_overlap
     
     # Store the new configs temporarily for later comparison
     # Don't set them as attributes yet - let the update functions handle that

@@ -415,6 +415,9 @@ class SeedVR2VideoUpscaler(io.ComfyNode):
 
         # TorchCompile args (optional connection, can be None)
         dit_torch_compile_args = dit.get("torch_compile_args")
+        dit_tiled = dit.get("dit_tiled", False)
+        dit_tile_size = max(1, int(dit.get("dit_tile_size", 128)))
+        dit_tile_overlap = max(0, int(dit.get("dit_tile_overlap", 16)))
         vae_torch_compile_args = vae.get("torch_compile_args")
         
         # Print header
@@ -472,6 +475,9 @@ class SeedVR2VideoUpscaler(io.ComfyNode):
                 decode_tile_size=(decode_tile_size, decode_tile_size),
                 decode_tile_overlap=(decode_tile_overlap, decode_tile_overlap),
                 tile_debug=tile_debug,
+                dit_tiled=dit_tiled,
+                dit_tile_size=(dit_tile_size, dit_tile_size),
+                dit_tile_overlap=(dit_tile_overlap, dit_tile_overlap),
                 attention_mode=attention_mode,
                 torch_compile_args_dit=dit_torch_compile_args,
                 torch_compile_args_vae=vae_torch_compile_args
