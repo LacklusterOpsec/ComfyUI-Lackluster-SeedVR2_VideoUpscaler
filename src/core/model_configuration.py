@@ -946,12 +946,10 @@ def configure_runner(
         )
         
         # Phase 4: Setup models (load from cache or create new)
-        debug.log("SeedVR2 breadcrumb: before _setup_models", category="runner", force=True)
         _setup_models(
             runner, cache_context, dit_model, vae_model, 
             base_cache_dir, block_swap_config, debug
         )
-        debug.log("SeedVR2 breadcrumb: after _setup_models", category="runner", force=True)
     except BaseException:
         _evict_claimed_cached_models(cache_context, runner, debug)
         if runner is not None and cache_context.get('reusing_runner', False):

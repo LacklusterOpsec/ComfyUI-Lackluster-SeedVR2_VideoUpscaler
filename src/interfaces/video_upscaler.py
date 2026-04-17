@@ -456,7 +456,6 @@ class SeedVR2VideoUpscaler(io.ComfyNode):
             )
 
             # Prepare runner with model state management and global cache
-            debug.log("SeedVR2 breadcrumb: before prepare_runner", category="runner", force=True)
             runner, cache_context = prepare_runner(
                 dit_model=dit_model, 
                 vae_model=vae_model, 
@@ -482,7 +481,6 @@ class SeedVR2VideoUpscaler(io.ComfyNode):
                 torch_compile_args_dit=dit_torch_compile_args,
                 torch_compile_args_vae=vae_torch_compile_args
             )
-            debug.log("SeedVR2 breadcrumb: after prepare_runner", category="runner", force=True)
 
             runner._seedvr2_execution_active = True
             runner._seedvr2_runner_tainted = False
@@ -497,32 +495,24 @@ class SeedVR2VideoUpscaler(io.ComfyNode):
                 and cache_context.get('cached_dit') is not None
                 and cache_context.get('cached_vae') is not None
             ):
-                debug.log("SeedVR2 breadcrumb: before set_runner", category="runner", force=True)
                 cache_context['global_cache'].set_runner(
                     cache_context.get('dit_id'),
                     cache_context.get('vae_id'),
                     runner,
                     debug,
                 )
-                debug.log("SeedVR2 breadcrumb: after set_runner", category="runner", force=True)
 
             # Store cache context in ctx for use in generation phases
             ctx['cache_context'] = cache_context
 
-            debug.log("SeedVR2 breadcrumb: before load_text_embeddings", category="dit", force=True)
             # Preload text embeddings before Phase 1 to avoid sync stall in Phase 2
             ctx['text_embeds'] = load_text_embeddings(script_directory, ctx['dit_device'], ctx['compute_dtype'], debug)
-            debug.log("SeedVR2 breadcrumb: after load_text_embeddings", category="dit", force=True)
+            debug.log("Loaded text embeddings for DiT", category="dit")
 
-            debug.log("SeedVR2 breadcrumb: before log_memory_state", category="memory", force=True)
             debug.log_memory_state("After model preparation", show_tensors=False, detailed_tensors=False)
-            debug.log("SeedVR2 breadcrumb: after log_memory_state", category="memory", force=True)
 
-            debug.log("SeedVR2 breadcrumb: before end_timer(model_preparation)", category="runner", force=True)
             debug.end_timer("model_preparation", "Model preparation", force=True, show_breakdown=True)
-            debug.log("SeedVR2 breadcrumb: after end_timer(model_preparation)", category="runner", force=True)
             
-            debug.log("SeedVR2 breadcrumb: before compute_generation_info", category="generation", force=True)
             # Compute generation info and log start (handles prepending internally)
             image, gen_info = compute_generation_info(
                 ctx=ctx,
@@ -536,7 +526,6 @@ class SeedVR2VideoUpscaler(io.ComfyNode):
                 temporal_overlap=temporal_overlap,
                 debug=debug
             )
-            debug.log("SeedVR2 breadcrumb: after compute_generation_info", category="generation", force=True)
             
             # Log generation start in consistent format
             log_generation_start(gen_info, debug)
