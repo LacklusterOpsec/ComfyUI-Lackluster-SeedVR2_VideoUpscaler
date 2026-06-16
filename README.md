@@ -36,6 +36,12 @@ We're actively working on improvements and new features. To stay informed:
 
 ## 🚀 Release Notes
 
+**2026.06.16 - Version 2.5.25**
+
+- **⚡ Fix: VRAM Leaks with torch.compile** - Implemented targeted post-compilation memory cleanup (`clear_memory(deep=True)`) after the initial VAE and DiT encoding/upscaling passes. This securely flushes temporary Inductor/Triton workspace memory generated during graph compilation, freeing up VRAM for actual inference and completely eliminating the memory overhead that previously persisted throughout the encoding pipeline.
+- **🎨 Fix: Zero-Seam SyncTiled DiT Inference** - Completely refactored the `dit_tiled` implementation into a native `_dit_forward` integration (MultiDiffusion-style). By evaluating tile patches simultaneously during the diffusion process and utilizing a localized spatial `_dit_blend_mask`, this eliminates seam artifacts that plague standard post-inference tiling.
+- **🛡️ Fix: Native Temporal Tiling Constraints** - Enforced strict dimensional restrictions in the DiT logic to align seamlessly with NaDiT requirements: spatial sizes and overlaps now strictly adhere to multiples of patch sizes (e.g., `step=2`), successfully passing native temporal validations.
+
 **2025.12.24 - Version 2.5.24**
 
 - **🍎 Fix: MPS memory leak regression** - Restored MPS cache clearing after VAE encode/decode operations that was accidentally removed during code cleanup in v2.5.23

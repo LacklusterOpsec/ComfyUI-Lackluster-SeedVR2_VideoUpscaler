@@ -418,14 +418,14 @@ class VideoDiffusionInfer():
         latents = self.sampler.sample(
             x=latents,
             f=lambda args: classifier_free_guidance_dispatcher(
-                pos=lambda: self.dit(
+                pos=lambda: self._dit_forward(
                     vid=torch.cat([args.x_t, latents_cond], dim=-1),
                     txt=text_pos_embeds,
                     vid_shape=latents_shapes,
                     txt_shape=text_pos_shapes,
                     timestep=args.t.repeat(batch_size),
                 ).vid_sample,
-                neg=lambda: self.dit(
+                neg=lambda: self._dit_forward(
                     vid=torch.cat([args.x_t, latents_cond], dim=-1),
                     txt=text_neg_embeds,
                     vid_shape=latents_shapes,
@@ -453,62 +453,65 @@ class VideoDiffusionInfer():
 
         return latents
 
-    def _inference_tiled_single(
-        self,
-        noise: Tensor,
-        condition: Tensor,
-        texts_pos: Union[List[str], List[Tensor], List[Tuple[Tensor]]],
-        texts_neg: Union[List[str], List[Tensor], List[Tuple[Tensor]]],
-        cfg_scale: Optional[float] = None,
-    ) -> Tensor:
-        if noise.ndim != 4 or condition.ndim != 4:
-            return self._inference_flat([noise], [condition], texts_pos, texts_neg, cfg_scale=cfg_scale)[0]
-
-        _, full_h, full_w, _ = noise.shape
-        tile_h = max(1, min(self.dit_tile_size[0], full_h))
-        tile_w = max(1, min(self.dit_tile_size[1], full_w))
-
+    def _dit_forward(self, vid, txt, vid_shape, txt_shape, timestep):
+        if not self.dit_tiled or len(vid_shape) != 1:
+            return self.dit(vid=vid, txt=txt, vid_shape=vid_shape, txt_shape=txt_shape, timestep=timestep)
+        
+        T, full_h, full_w = vid_shape[0]
+        
+        tile_h = max(1, min(self.dit_tile_size[0], full_h.item()))
+        tile_w = max(1, min(self.dit_tile_size[1], full_w.item()))
+        tile_h = (tile_h // 2) * 2
+        tile_w = (tile_w // 2) * 2
+        
         if full_h <= tile_h and full_w <= tile_w:
-            return self._inference_flat([noise], [condition], texts_pos, texts_neg, cfg_scale=cfg_scale)[0]
-
+            return self.dit(vid=vid, txt=txt, vid_shape=vid_shape, txt_shape=txt_shape, timestep=timestep)
+            
         overlap_h = max(0, min(self.dit_tile_overlap[0], tile_h - 1))
+        overlap_h = (overlap_h // 2) * 2
         overlap_w = max(0, min(self.dit_tile_overlap[1], tile_w - 1))
-        y_starts = self._tile_axis_starts(full_h, tile_h, overlap_h)
-        x_starts = self._tile_axis_starts(full_w, tile_w, overlap_w)
+        overlap_w = (overlap_w // 2) * 2
+        
+        y_starts = self._tile_axis_starts(full_h.item(), tile_h, overlap_h)
+        x_starts = self._tile_axis_starts(full_w.item(), tile_w, overlap_w)
+        
+        vid_unflattened = vid.view(T, full_h, full_w, -1)
+        C = vid_unflattened.shape[-1]
+        
+        from ..models.dit_3b.nadit import NaDiTOutput
+        
+        result = torch.zeros((T, full_h, full_w, 16), device=vid.device, dtype=vid.dtype)
+        weight_sum = torch.zeros((T, full_h, full_w, 1), device=vid.device, dtype=vid.dtype)
+        
         tile_count = len(y_starts) * len(x_starts)
-
-        if self.debug is not None:
+        if self.debug is not None and getattr(self, '_first_tiled_step', True):
             self.debug.log(
-                f"Using DiT tiled inference ({tile_count} tiles, size {tile_h}x{tile_w}, overlap {overlap_h}x{overlap_w})",
+                f"Using SyncTiled DiT inference ({tile_count} tiles, size {tile_h}x{tile_w}, overlap {overlap_h}x{overlap_w})",
                 category="dit",
                 force=True,
                 indent_level=1,
             )
-
-        result = None
-        weight_sum = None
-        tile_index = 0
-
+            self._first_tiled_step = False
+            
         for y0 in y_starts:
-            y1 = min(y0 + tile_h, full_h)
+            y1 = min(y0 + tile_h, full_h.item())
             for x0 in x_starts:
-                x1 = min(x0 + tile_w, full_w)
-                tile_index += 1
-                if self.debug is not None and (tile_index == 1 or tile_index == tile_count or tile_index % 4 == 0):
-                    self.debug.log(
-                        f"DiT tile {tile_index}/{tile_count}: y={y0}:{y1}, x={x0}:{x1}",
-                        category="dit",
-                        indent_level=2,
-                    )
-
-                noise_tile = noise[:, y0:y1, x0:x1, :]
-                condition_tile = condition[:, y0:y1, x0:x1, :]
-                tile_result = self._inference_flat([noise_tile], [condition_tile], texts_pos, texts_neg, cfg_scale=cfg_scale)[0]
-
-                if result is None:
-                    result = torch.zeros_like(noise)
-                    weight_sum = torch.zeros((*noise.shape[:-1], 1), device=noise.device, dtype=tile_result.dtype)
-
+                x1 = min(x0 + tile_w, full_w.item())
+                
+                vid_tile = vid_unflattened[:, y0:y1, x0:x1, :]
+                tile_shape = torch.tensor([[T, y1 - y0, x1 - x0]], device=vid_shape.device, dtype=vid_shape.dtype)
+                vid_tile_flat = vid_tile.reshape(-1, C)
+                
+                tile_out_flat = self.dit(
+                    vid=vid_tile_flat, 
+                    txt=txt, 
+                    vid_shape=tile_shape, 
+                    txt_shape=txt_shape, 
+                    timestep=timestep
+                ).vid_sample
+                
+                tile_out = tile_out_flat.view(T, y1 - y0, x1 - x0, -1)
+                
                 blend_mask = self._dit_blend_mask(
                     tile_h=y1 - y0,
                     tile_w=x1 - x0,
@@ -516,21 +519,19 @@ class VideoDiffusionInfer():
                     y1=y1,
                     x0=x0,
                     x1=x1,
-                    full_h=full_h,
-                    full_w=full_w,
-                    device=tile_result.device,
-                    dtype=tile_result.dtype,
+                    full_h=full_h.item(),
+                    full_w=full_w.item(),
+                    device=tile_out.device,
+                    dtype=tile_out.dtype,
                 )
-
-                result[:, y0:y1, x0:x1, :] += tile_result * blend_mask
+                
+                result[:, y0:y1, x0:x1, :] += tile_out * blend_mask
                 weight_sum[:, y0:y1, x0:x1, :] += blend_mask
-
-                del noise_tile, condition_tile, tile_result, blend_mask
 
         weight_sum = torch.clamp(weight_sum, min=torch.finfo(weight_sum.dtype).eps)
         result = result / weight_sum
-        del weight_sum
-        return result
+        
+        return NaDiTOutput(vid_sample=result.view(-1, 16))
 
     @torch.no_grad()
     def inference(
@@ -544,15 +545,6 @@ class VideoDiffusionInfer():
         if len(noises) == 0:
             return []
 
-        if not self.dit_tiled or len(noises) != 1:
-            return self._inference_flat(noises, conditions, texts_pos, texts_neg, cfg_scale=cfg_scale)
-
-        return [
-            self._inference_tiled_single(
-                noise=noises[0],
-                condition=conditions[0],
-                texts_pos=texts_pos,
-                texts_neg=texts_neg,
-                cfg_scale=cfg_scale,
-            )
-        ]
+        # Tiling is now handled inside _inference_flat via _dit_forward at each timestep
+        self._first_tiled_step = True
+        return self._inference_flat(noises, conditions, texts_pos, texts_neg, cfg_scale=cfg_scale)

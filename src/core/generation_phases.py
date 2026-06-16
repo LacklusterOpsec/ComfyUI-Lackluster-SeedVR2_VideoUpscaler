@@ -568,6 +568,14 @@ def encode_all_batches(
             
             del cond_latents
             
+            # Post-compilation memory cleanup
+            if encode_idx == 0 and getattr(runner, '_vae_compile_args', None):
+                # Force garbage collection and CUDA cache empty to clear compilation memory overhead
+                from ..optimization.memory_manager import clear_memory
+                if getattr(debug, 'enabled', False):
+                    debug.log("Clearing VRAM overhead from initial VAE torch.compile pass", category="memory", force=True)
+                clear_memory(debug=debug, deep=True, force=True, timer_name="vae_post_compile_cleanup")
+            
             debug.end_timer(f"encode_batch_{encode_idx+1}", f"Encoded batch {encode_idx+1}")
             
             if progress_callback:
@@ -810,6 +818,14 @@ def upscale_all_batches(
             ctx['all_latents'][batch_idx] = None
             
             del noises, aug_noises, latent, conditions, condition, base_noise, upscaled_latents
+            
+            # Post-compilation memory cleanup
+            if upscale_idx == 0 and getattr(runner, '_dit_compile_args', None):
+                # Force garbage collection and CUDA cache empty to clear compilation memory overhead
+                from ..optimization.memory_manager import clear_memory
+                if getattr(debug, 'enabled', False):
+                    debug.log("Clearing VRAM overhead from initial DiT torch.compile pass", category="memory", force=True)
+                clear_memory(debug=debug, deep=True, force=True, timer_name="dit_post_compile_cleanup")
             
             debug.end_timer(f"upscale_batch_{upscale_idx+1}", f"Upscaled batch {upscale_idx+1}")
             

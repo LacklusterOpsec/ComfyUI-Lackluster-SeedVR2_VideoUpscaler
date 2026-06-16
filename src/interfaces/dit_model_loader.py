@@ -149,7 +149,7 @@ class SeedVR2LoadDiTModel(io.ComfyNode):
                     default=16,
                     min=0,
                     max=512,
-                    step=1,
+                    step=2,
                     optional=True,
                     tooltip=(
                         "Overlap between DiT latent tiles in pixels (default: 16).\n"
