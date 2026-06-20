@@ -1,6 +1,6 @@
 # ComfyUI-Lackluster-SeedVR2-VideoUpscaler
 
-Vibecoded tewaks and fixes - Deepseek 4 Pro and Gemini Pro
+Vibecoded tweaks and fixes - Deepseek 4 Pro and Gemini Pro
 
 **2026.06.16 - Version 2.5.25**
 
