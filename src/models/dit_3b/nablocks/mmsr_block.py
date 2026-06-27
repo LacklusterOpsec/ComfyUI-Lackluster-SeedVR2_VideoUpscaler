@@ -117,7 +117,7 @@ class NaMMSRTransformerBlock(nn.Module):
                 vid_scaleA, vid_scaleB, vid_shiftA, vid_shiftB = vid_res
                 vid_attn = fused_adaln_forward(vid, vid_scaleA, vid_shiftA, vid_scaleB, vid_shiftB, getattr(vid_norm_module, "eps", 1e-5))
                 
-                if not self.attn_norm.vid_only:
+                if not self.attn_norm.vid_only and not self.ada.vid_only:
                     txt_norm_module = self.attn_norm.txt if not self.attn_norm.shared_weights else self.attn_norm.all
                     txt_scaleA, txt_scaleB, txt_shiftA, txt_shiftB = txt_res
                     txt_attn = fused_adaln_forward(txt, txt_scaleA, txt_shiftA, txt_scaleB, txt_shiftB, getattr(txt_norm_module, "eps", 1e-5))
